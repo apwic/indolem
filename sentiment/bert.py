@@ -94,7 +94,8 @@ class Model(nn.Module):
         self.loss = torch.nn.BCELoss(reduction='none') 
 
     def forward(self, src, seg, mask_src):
-        top_vec, _ = self.bert(input_ids=src, token_type_ids=seg, attention_mask=mask_src)
+        output = self.bert(input_ids=src, token_type_ids=seg, attention_mask=mask_src)
+        top_vec = output.last_hidden_state
         top_vec = self.dropout(top_vec)
         top_vec *= mask_src.unsqueeze(dim=-1).float()
         top_vec = torch.sum(top_vec, dim=1) / mask_src.sum(dim=-1).float().unsqueeze(-1)
