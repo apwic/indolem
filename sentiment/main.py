@@ -3,8 +3,8 @@ import argparse
 import torch
 import pandas as pd
 from utils.utils import set_seed
-from utils.preprocessing import BertData
-from utils.models import Model
+from utils.preprocessing import SentimentData
+from utils.models import SentimentModel
 
 logger = logging.getLogger(__name__)
 lang2model = { 'id': 'indolem/indobert-base-uncased',
@@ -54,7 +54,7 @@ if args.local_rank not in [-1, 0]:
 if args.local_rank == 0:
     torch.distributed.barrier()
 
-bertdata = BertData(args, lang2model)
+bertdata = SentimentData(args, lang2model)
 
 dev_f1s = 0.0
 test_f1s = 0.0
@@ -65,13 +65,13 @@ for idx in range(5):
     xtrain, ytrain = list(trainset['sentence']), list(trainset['sentiment'])
     xdev, ydev = list(devset['sentence']), list(devset['sentiment'])
     xtest, ytest = list(testset['sentence']), list(testset['sentiment'])
-    model = Model(args, device, logger, lang2model, lang2pad)
+    model = SentimentModel(args, device, logger, lang2model, lang2pad)
     model.to(args.device)
     train_dataset = bertdata.preprocess(xtrain, ytrain)
     dev_dataset = bertdata.preprocess(xdev, ydev)
     test_dataset = bertdata.preprocess(xtest, ytest)
     
-    global_step, tr_loss, best_f1_dev, best_f1_test = model.process(train_dataset, dev_dataset, test_dataset)
+    global_step, tr_loss, best_f1_dev, best_f1_test = model.train_model(train_dataset, dev_dataset, test_dataset)
     dev_f1s += best_f1_dev
     test_f1s += best_f1_test
 

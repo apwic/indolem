@@ -1,6 +1,6 @@
 from transformers import BertTokenizer, AlbertTokenizer
 
-class BertData():
+class BaseData():
     def __init__(self, args, lang2model) -> None:
         self.MAX_TOKEN = args.max_token
         self.sep_token = '[SEP]'
@@ -20,6 +20,20 @@ class BertData():
             self.pad_vid = self.tokenizer.convert_tokens_to_ids(self.pad_token)
     
     def preprocess_one(self, src_txt, label):
+        raise NotImplementedError
+    
+    def preprocess(self, src_txts, labels):
+        assert len(src_txts) == len(labels)
+        output = []
+        for idx in range(len(src_txts)):
+            output.append(self.preprocess_one(src_txts[idx], labels[idx]))
+        return output
+
+class SentimentData(BaseData):
+    def __init__(self, args, lang2model) -> None:
+        super().__init__(args, lang2model)
+
+    def preprocess_one(self, src_txt, label):
         src_subtokens = [self.cls_token] + self.tokenizer.tokenize(src_txt) + [self.sep_token]        
         src_subtoken_idxs = self.tokenizer.convert_tokens_to_ids(src_subtokens)
         
@@ -31,10 +45,27 @@ class BertData():
         segments_ids = [0] * len(src_subtoken_idxs)
         assert len(src_subtoken_idxs) == len(segments_ids)
         return src_subtoken_idxs, segments_ids, label
-    
-    def preprocess(self, src_txts, labels):
-        assert len(src_txts) == len(labels)
-        output = []
-        for idx in range(len(src_txts)):
-            output.append(self.preprocess_one(src_txts[idx], labels[idx]))
-        return output
+
+class NTPData(BaseData):
+    def __init__(self, args, lang2model) -> None:
+        super().__init__(args, lang2model)
+        self.MAX_TOKEN_PREMISE = args.max_token_premise
+        self.MAX_TOKEN_NEXT = args.max_token_nextTw
+
+    def preprocess_one(self, premise, nextTw, label):
+        premise_subtokens = [self.cls_token] + self.tokenizer.tokenize(premise) + [self.sep_token]        
+        premise_subtoken_idxs = self.tokenizer.convert_tokens_to_ids(premise_subtokens)
+        if len(premise_subtoken_idxs) > self.MAX_TOKEN_PREMISE:
+            premise_subtoken_idxs = premise_subtoken_idxs[len(premise_subtoken_idxs)-self.MAX_TOKEN_PREMISE:]
+            premise_subtoken_idxs[0] = self.cls_vid
+
+        nextTw_subtokens = self.tokenizer.tokenize(nextTw) + [self.sep_token]
+        nextTw_subtoken_idxs = self.tokenizer.convert_tokens_to_ids(nextTw_subtokens)
+        if len(nextTw_subtoken_idxs) > self.MAX_TOKEN_NEXT:
+            nextTw_subtoken_idxs = nextTw_subtoken_idxs[:self.MAX_TOKEN_NEXT]
+            nextTw_subtoken_idxs[-1] = self.sep_vid
+
+        src_subtoken_idxs = premise_subtoken_idxs + nextTw_subtoken_idxs
+        segments_ids = [0] * len(premise_subtoken_idxs) + [1] * len(nextTw_subtoken_idxs)
+        assert len(src_subtoken_idxs) == len(segments_ids)
+        return src_subtoken_idxs, segments_ids, label

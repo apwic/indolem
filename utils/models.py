@@ -2,29 +2,31 @@ import random
 import numpy as np
 import torch
 import torch.nn as nn
+import adapters
 from sklearn.metrics import f1_score, accuracy_score
 from transformers import BertModel, get_linear_schedule_with_warmup
 from utils.utils import set_seed
+from utils.batch import SentimentBatch, NTPBatch
 
-class Batch():
-    def __init__(self, data, idx, args, lang2pad):
-        cur_batch = data[idx:idx+args.batch_size]
-        src = torch.tensor([x[0] for x in cur_batch])
-        seg = torch.tensor([x[1] for x in cur_batch])
-        label = torch.tensor([x[2] for x in cur_batch])
-        mask_src = 0 + (src!=lang2pad[args.bert_lang])
+# class Batch():
+#     def __init__(self, data, idx, args, lang2pad):
+#         cur_batch = data[idx:idx+args.batch_size]
+#         src = torch.tensor([x[0] for x in cur_batch])
+#         seg = torch.tensor([x[1] for x in cur_batch])
+#         label = torch.tensor([x[2] for x in cur_batch])
+#         mask_src = 0 + (src!=lang2pad[args.bert_lang])
         
-        self.src = src.to(args.device)
-        self.seg= seg.to(args.device)
-        self.label = label.to(args.device)
-        self.mask_src = mask_src.to(args.device)
+#         self.src = src.to(args.device)
+#         self.seg= seg.to(args.device)
+#         self.label = label.to(args.device)
+#         self.mask_src = mask_src.to(args.device)
 
-    def get(self):
-        return self.src, self.seg, self.label, self.mask_src
+#     def get(self):
+#         return self.src, self.seg, self.label, self.mask_src
     
-class Model(nn.Module):
+class BaseModel(nn.Module):
     def __init__(self, args, device, logger, lang2model, lang2pad):
-        super(Model, self).__init__()
+        super(BaseModel, self).__init__()
         self.args = args
         self.device = device
         self.bert = BertModel.from_pretrained(lang2model[args.bert_lang])
@@ -35,38 +37,22 @@ class Model(nn.Module):
         self.logger = logger
         self.lang2model = lang2model
         self.lang2pad = lang2pad
-
+        self.Batch = None
+    
     def forward(self, src, seg, mask_src):
-        output = self.bert(input_ids=src, token_type_ids=seg, attention_mask=mask_src)
-        top_vec = output.last_hidden_state
-        top_vec = self.dropout(top_vec)
-        top_vec *= mask_src.unsqueeze(dim=-1).float()
-        top_vec = torch.sum(top_vec, dim=1) / mask_src.sum(dim=-1).float().unsqueeze(-1)
-        conclusion = self.linear(top_vec).squeeze()
-        return self.sigmoid(conclusion)
+        raise NotImplementedError
+    
+    def predict(self, src, seg, mask_src):
+        raise NotImplementedError
+    
+    def prediction(self, dataset):
+        raise NotImplementedError
     
     def get_loss(self, src, seg, label, mask_src):
         output = self.forward(src, seg, mask_src)
         return self.loss(output, label.float())
     
-    def prediction(self, dataset):
-        preds = []
-        golds = []
-        self.eval()
-        for j in range(0, len(dataset), self.args.batch_size):
-            src, seg, label, mask_src = Batch(dataset, j, self.args, self.lang2pad).get()
-            preds += self.predict(src, seg, mask_src)
-            golds += label.cpu().data.numpy().tolist()
-        return f1_score(golds, preds), accuracy_score(golds, preds)
-
-    def predict(self, src, seg, mask_src):
-        output = self.forward(src, seg, mask_src)
-        prediction = output.cpu().data.numpy() > 0.5
-        if type (prediction) == np.bool_:
-            return [int(prediction)]
-        return [int(x) for x in prediction]
-    
-    def process(self, train_dataset, dev_dataset, test_dataset):
+    def train_model(self, train_dataset, dev_dataset, test_dataset):
         """ Train the model """
         # Prepare optimizer and schedule (linear warmup and decay)
         no_decay = ["bias", "LayerNorm.weight"]
@@ -102,7 +88,7 @@ class Model(nn.Module):
             random.shuffle(train_dataset)
             epoch_loss = 0.0
             for j in range(0, len(train_dataset), self.args.batch_size):
-                src, seg, label, mask_src = Batch(train_dataset, j, self.args, self.lang2pad).get()
+                src, seg, label, mask_src = self.Batch(train_dataset, j, self.args, self.lang2pad).get()
                 self.train()
                 loss = self.get_loss(src, seg, label, mask_src)
                 loss = loss.sum()/self.args.batch_size
@@ -112,17 +98,17 @@ class Model(nn.Module):
 
                 tr_loss += loss.item()
                 epoch_loss += loss.item()
-                torch.nn.utils.clip_grad_norm_(self.parameters(), self.args.max_grad_norm)
+                nn.utils.clip_grad_norm_(self.parameters(), self.args.max_grad_norm)
                 optimizer.step()
                 scheduler.step()  # Update learning rate schedule
                 self.zero_grad()
                 global_step += 1
             
             self.logger.info("Finish epoch = %s, loss_epoch = %s", i+1, epoch_loss/global_step)
-            dev_f1, dev_acc = self.prediction(dev_dataset, self.args)
+            dev_f1, dev_acc = self.prediction(dev_dataset)
             if dev_f1 > best_f1_dev:
                 best_f1_dev = dev_f1
-                test_f1, test_acc = self.prediction(test_dataset, self.args)
+                test_f1, test_acc = self.prediction(test_dataset)
                 best_f1_test = test_f1
                 cur_patience = 0
                 self.logger.info("Better, BEST F1 in DEV = %s & BEST F1 in test = %s.", best_f1_dev, best_f1_test)
@@ -135,3 +121,70 @@ class Model(nn.Module):
                     self.logger.info("Not Better, BEST F1 in DEV = %s & BEST F1 in test = %s.", best_f1_dev, best_f1_test)
 
         return global_step, tr_loss / global_step, best_f1_dev, best_f1_test
+
+class SentimentModel(BaseModel):
+    def __init__(self, args, device, logger, lang2model, lang2pad):
+        super().__init__(args, device, logger, lang2model, lang2pad)
+        self.Batch = SentimentBatch
+
+    def forward(self, src, seg, mask_src):
+        output = self.bert(input_ids=src, token_type_ids=seg, attention_mask=mask_src)
+        top_vec = output.last_hidden_state
+        top_vec = self.dropout(top_vec)
+        top_vec *= mask_src.unsqueeze(dim=-1).float()
+        top_vec = torch.sum(top_vec, dim=1) / mask_src.sum(dim=-1).float().unsqueeze(-1)
+        conclusion = self.linear(top_vec).squeeze()
+        return self.sigmoid(conclusion)
+    
+    def predict(self, src, seg, mask_src):
+        output = self.forward(src, seg, mask_src)
+        prediction = output.cpu().data.numpy() > 0.5
+        if type (prediction) == np.bool_:
+            return [int(prediction)]
+        return [int(x) for x in prediction]
+    
+    def prediction(self, dataset):
+        preds = []
+        golds = []
+        self.eval()
+        for j in range(0, len(dataset), self.args.batch_size):
+            src, seg, label, mask_src = self.Batch(dataset, j, self.args, self.lang2pad).get()
+            preds += self.predict(src, seg, mask_src)
+            golds += label.cpu().data.numpy().tolist()
+        return f1_score(golds, preds), accuracy_score(golds, preds)
+    
+class NextTweetPredictionModel(BaseModel):
+    def __init__(self, args, device, logger, lang2model, lang2pad):
+        super().__init__(args, device, logger, lang2model, lang2pad)
+        self.Batch = NTPBatch
+
+    def forward(self, src, seg, mask_src):
+        output = self.bert(input_ids=src, token_type_ids=seg, attention_mask=mask_src)
+        top_vec = output.last_hidden_state
+        clss = top_vec[:,0,:]
+        final_rep = self.dropout(clss)
+        conclusion = self.linear(final_rep).squeeze()
+        return self.sigmoid(conclusion)
+    
+    def predict(self, src, seg, label, mask_src):
+        output = self.forward(src, seg, mask_src)
+        batch_size = output.shape[0]
+        assert batch_size%4 == 0
+        output = output.view(int(batch_size/4), 4)
+        prediction = torch.argmax(output, dim=-1).data.cpu().numpy().tolist()
+        answer = label.view(int(batch_size/4), 4)
+        answer = torch.argmax(answer, dim=-1).data.cpu().numpy().tolist()
+        return answer, prediction
+    
+    def prediction(self, dataset):
+        preds = []
+        golds = []
+        self.eval()
+        assert len(dataset)%4==0
+        assert self.args.batch_size%4==0
+        for j in range(0, len(dataset), self.args.batch_size):
+            src, seg, label, mask_src = self.Batch(dataset, j, self.args.batch_size, self.args.device).get()
+            answer, prediction = self.predict(src, seg, mask_src, label)
+            golds += answer
+            preds += prediction
+        return accuracy_score(golds, preds)

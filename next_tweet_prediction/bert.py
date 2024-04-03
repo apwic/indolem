@@ -12,7 +12,6 @@ from sklearn.metrics import f1_score, accuracy_score
 from transformers import BertTokenizer, AlbertTokenizer, BertModel
 from transformers import AdamW, get_linear_schedule_with_warmup
 
-
 logger = logging.getLogger(__name__)
 lang2model = { 'id': 'indolem/indobert-base-uncased',
                'multi': 'bert-base-multilingual-uncased',
