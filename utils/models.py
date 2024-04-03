@@ -8,27 +8,11 @@ from transformers import BertModel, get_linear_schedule_with_warmup
 from utils.utils import set_seed
 from utils.batch import SentimentBatch, NTPBatch
 
-# class Batch():
-#     def __init__(self, data, idx, args, lang2pad):
-#         cur_batch = data[idx:idx+args.batch_size]
-#         src = torch.tensor([x[0] for x in cur_batch])
-#         seg = torch.tensor([x[1] for x in cur_batch])
-#         label = torch.tensor([x[2] for x in cur_batch])
-#         mask_src = 0 + (src!=lang2pad[args.bert_lang])
-        
-#         self.src = src.to(args.device)
-#         self.seg= seg.to(args.device)
-#         self.label = label.to(args.device)
-#         self.mask_src = mask_src.to(args.device)
-
-#     def get(self):
-#         return self.src, self.seg, self.label, self.mask_src
-    
 class BaseModel(nn.Module):
-    def __init__(self, args, device, logger, lang2model, lang2pad):
-        super(BaseModel, self).__init__()
+    def __init__(self, args, logger, lang2model, lang2pad):
+        super().__init__()
         self.args = args
-        self.device = device
+        self.device = args.device
         self.bert = BertModel.from_pretrained(lang2model[args.bert_lang])
         self.linear = nn.Linear(self.bert.config.hidden_size, 1)
         self.dropout = nn.Dropout(0.2)
@@ -38,6 +22,8 @@ class BaseModel(nn.Module):
         self.lang2model = lang2model
         self.lang2pad = lang2pad
         self.Batch = None
+
+        
     
     def forward(self, src, seg, mask_src):
         raise NotImplementedError
@@ -123,8 +109,8 @@ class BaseModel(nn.Module):
         return global_step, tr_loss / global_step, best_f1_dev, best_f1_test
 
 class SentimentModel(BaseModel):
-    def __init__(self, args, device, logger, lang2model, lang2pad):
-        super().__init__(args, device, logger, lang2model, lang2pad)
+    def __init__(self, args, logger, lang2model, lang2pad):
+        super().__init__(args, logger, lang2model, lang2pad)
         self.Batch = SentimentBatch
 
     def forward(self, src, seg, mask_src):
@@ -154,8 +140,8 @@ class SentimentModel(BaseModel):
         return f1_score(golds, preds), accuracy_score(golds, preds)
     
 class NextTweetPredictionModel(BaseModel):
-    def __init__(self, args, device, logger, lang2model, lang2pad):
-        super().__init__(args, device, logger, lang2model, lang2pad)
+    def __init__(self, args, logger, lang2model, lang2pad):
+        super().__init__(args, logger, lang2model, lang2pad)
         self.Batch = NTPBatch
 
     def forward(self, src, seg, mask_src):

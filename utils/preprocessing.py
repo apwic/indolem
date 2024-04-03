@@ -2,7 +2,6 @@ from transformers import BertTokenizer, AlbertTokenizer
 
 class BaseData():
     def __init__(self, args, lang2model) -> None:
-        self.MAX_TOKEN = args.max_token
         self.sep_token = '[SEP]'
         self.cls_token = '[CLS]'
         self.pad_token = '[PAD]'
@@ -19,19 +18,16 @@ class BaseData():
             self.cls_vid = self.tokenizer.convert_tokens_to_ids(self.cls_token)
             self.pad_vid = self.tokenizer.convert_tokens_to_ids(self.pad_token)
     
-    def preprocess_one(self, src_txt, label):
+    def preprocess_one(self):
         raise NotImplementedError
     
-    def preprocess(self, src_txts, labels):
-        assert len(src_txts) == len(labels)
-        output = []
-        for idx in range(len(src_txts)):
-            output.append(self.preprocess_one(src_txts[idx], labels[idx]))
-        return output
+    def preprocess(self):
+        raise NotImplementedError
 
 class SentimentData(BaseData):
     def __init__(self, args, lang2model) -> None:
         super().__init__(args, lang2model)
+        self.MAX_TOKEN = args.max_token
 
     def preprocess_one(self, src_txt, label):
         src_subtokens = [self.cls_token] + self.tokenizer.tokenize(src_txt) + [self.sep_token]        
@@ -45,6 +41,13 @@ class SentimentData(BaseData):
         segments_ids = [0] * len(src_subtoken_idxs)
         assert len(src_subtoken_idxs) == len(segments_ids)
         return src_subtoken_idxs, segments_ids, label
+    
+    def preprocess(self, src_txts, labels):
+        assert len(src_txts) == len(labels)
+        output = []
+        for idx in range(len(src_txts)):
+            output.append(self.preprocess_one(src_txts[idx], labels[idx]))
+        return output
 
 class NTPData(BaseData):
     def __init__(self, args, lang2model) -> None:
@@ -69,3 +72,10 @@ class NTPData(BaseData):
         segments_ids = [0] * len(premise_subtoken_idxs) + [1] * len(nextTw_subtoken_idxs)
         assert len(src_subtoken_idxs) == len(segments_ids)
         return src_subtoken_idxs, segments_ids, label
+    
+    def preprocess(self, premises, nextTws, labels):
+        assert len(premises) == len(nextTws) == len(labels)
+        output = []
+        for idx in range(len(premises)):
+            output.append(self.preprocess_one(premises[idx], nextTws[idx], labels[idx]))
+        return output

@@ -108,8 +108,8 @@ class Model(nn.Module):
         self.loss = torch.nn.BCELoss(reduction='none') 
 
     def forward(self, src, seg, mask_src):
-        batch_size = src.shape[0]
-        top_vec, _ = self.bert(input_ids=src, token_type_ids=seg, attention_mask=mask_src)
+        output = self.bert(input_ids=src, token_type_ids=seg, attention_mask=mask_src)
+        top_vec = output.last_hidden_state
         clss = top_vec[:,0,:]
         final_rep = self.dropout(clss)
         conclusion = self.linear(final_rep).squeeze()
