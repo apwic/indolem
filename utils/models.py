@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import adapters
+from adapters import ConfigUnion, LoRAConfig, PrefixTuningConfig, IA3Config
 from sklearn.metrics import f1_score, accuracy_score
 from transformers import BertModel, get_linear_schedule_with_warmup
 from utils.utils import set_seed
@@ -22,8 +23,33 @@ class BaseModel(nn.Module):
         self.lang2model = lang2model
         self.lang2pad = lang2pad
         self.Batch = None
+        self.adapters = args.adapters
 
-        
+        # Initialize adapters based on specified configurations
+        if self.adapters:
+            adapters.init(self.bert)
+            config_list = []
+            for adapter_name in self.adapters:
+                config = self.get_adapter_config(adapter_name)
+                if config is not None:
+                    config_list.append(config)
+            
+            if config_list:
+                # Create a ConfigUnion from the list of configurations
+                config_union = ConfigUnion(*config_list)
+                self.bert.add_adapter("adapters", config=config_union)
+                self.bert.train_adapter("adapters")
+
+    def get_adapter_config(self, adapter_name):
+        if adapter_name == "lora":
+            return LoRAConfig(r=8, dropout=0.01)
+        elif adapter_name == "prefix_tuning":
+            return PrefixTuningConfig(flat=False, prefix_length=10)
+        elif adapter_name == "IA3":
+            return IA3Config()
+        else:
+            self.logger.warning(f"Adapter configuration for '{adapter_name}' not found.")
+            return None
     
     def forward(self, src, seg, mask_src):
         raise NotImplementedError
