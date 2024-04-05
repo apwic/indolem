@@ -79,3 +79,41 @@ class NTPData(BaseData):
         for idx in range(len(premises)):
             output.append(self.preprocess_one(premises[idx], nextTws[idx], labels[idx]))
         return output
+    
+class TweetOrderingData(BaseData):
+    def __init__(self, args, lang2model) -> None:
+        super().__init__(args, lang2model)
+        self.MAX_TOKEN_TWEET = args.max_token_tweet
+
+    def preprocess_one(self, tweet, label):
+        tweet_subtoken_ids = [self.tokenizer.convert_tokens_to_ids([self.cls_token]+self.tokenizer.tokenize(t)[:self.MAX_TOKEN_TWEET]+[self.sep_token]) for t in tweet]
+        tmp = []
+        for arr in tweet_subtoken_ids:
+            tmp += arr
+        tweet_subtoken_ids = tmp
+        cls_id = []; segment_id = []
+        cls_mask = []
+        flip=False
+        for i, token in enumerate(tweet_subtoken_ids):
+            if token == self.cls_vid:
+                cls_id.append(i)
+                cls_mask.append(1)
+                flip = not flip
+            if flip:
+                segment_id.append(0)
+            else:
+                segment_id.append(1)
+        idx=len(cls_id)
+        while idx < 5:
+            cls_id.append(0)
+            cls_mask.append(0)
+            label.append(5)
+            idx+=1
+        return tweet_subtoken_ids, segment_id, cls_id, cls_mask, label
+    
+    def preprocess(self, tweets, labels):
+        assert len(tweets) == len(labels)
+        output = []
+        for idx in range(len(tweets)):
+            output.append(self.preprocess_one(tweets[idx], labels[idx]))
+        return output

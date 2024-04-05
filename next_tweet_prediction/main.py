@@ -4,7 +4,7 @@ import torch
 import pandas as pd
 from utils.utils import set_seed, read_data_ntp, setup_environment
 from utils.preprocessing import NTPData
-from utils.models import NextTweetPredictionModel
+from utils.models import NTPModel
 from utils.argparser import NTPArgParser
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ if __name__ == "__main__":
     trainset = read_data_ntp(args.data_path+'train.json')
     devset = read_data_ntp(args.data_path+'dev.json')
     testset = read_data_ntp(args.data_path+'test.json')
-    model = NextTweetPredictionModel(args, logger, lang2model, lang2pad)
+    model = NTPModel(args, logger, lang2model, lang2pad)
     model.to(args.device)
     train_dataset = bertdata.preprocess(trainset[0], trainset[1], trainset[2])
     dev_dataset = bertdata.preprocess(devset[0], devset[1], devset[2])

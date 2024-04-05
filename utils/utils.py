@@ -24,6 +24,15 @@ def read_data_ntp(fname):
             label.append(key)
     return chat, response, label
 
+def read_data_tweet_ordering(fname):
+    tweets = []
+    labels = []
+    data=json.load(open(fname,'r'))
+    for datum in data:
+        tweets.append(datum['tweets'])
+        labels.append(datum['order'])
+    return tweets, labels
+
 def setup_environment(args):
     # Check if CUDA is available and not disabled by --no_cuda
     use_cuda = torch.cuda.is_available() and not args.no_cuda

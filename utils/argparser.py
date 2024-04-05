@@ -36,3 +36,8 @@ class NTPArgParser(BaseArgParser):
         super().__init__()
         self.add_argument('--max_token_premise', type=int, default=240, help='maximum token allowed for premise')
         self.add_argument('--max_token_nextTw', type=int, default=40, help='maximum token allowed for next tweet')
+
+class TweetOrderingArgParser(BaseArgParser):
+    def __init__(self):
+        super().__init__()
+        self.add_argument('--max_token_tweet', type=int, default=50, help='maximum token (subwords) allowed for 1 tweet')

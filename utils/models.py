@@ -3,11 +3,13 @@ import numpy as np
 import torch
 import torch.nn as nn
 import adapters
+from scipy.stats import spearmanr
+from itertools import permutations
 from adapters import ConfigUnion, LoRAConfig, PrefixTuningConfig, IA3Config
 from sklearn.metrics import f1_score, accuracy_score
 from transformers import BertModel, get_linear_schedule_with_warmup
 from utils.utils import set_seed
-from utils.batch import SentimentBatch, NTPBatch
+from utils.batch import SentimentBatch, NTPBatch, TweetOrderingBatch
 
 class BaseModel(nn.Module):
     def __init__(self, args, logger, lang2model, lang2pad):
@@ -15,10 +17,6 @@ class BaseModel(nn.Module):
         self.args = args
         self.device = args.device
         self.bert = BertModel.from_pretrained(lang2model[args.bert_lang])
-        self.linear = nn.Linear(self.bert.config.hidden_size, 1)
-        self.dropout = nn.Dropout(0.2)
-        self.sigmoid = nn.Sigmoid()
-        self.loss = nn.BCELoss(reduction='none') 
         self.logger = logger
         self.lang2model = lang2model
         self.lang2pad = lang2pad
@@ -40,6 +38,7 @@ class BaseModel(nn.Module):
                 self.bert.add_adapter("adapters", config=config_union)
                 self.bert.train_adapter("adapters")
 
+    # TODO: Adding arguments for adapters hyperparameter
     def get_adapter_config(self, adapter_name):
         if adapter_name == "lora":
             return LoRAConfig(r=8, dropout=0.01)
@@ -61,9 +60,9 @@ class BaseModel(nn.Module):
         raise NotImplementedError
     
     def get_loss(self, src, seg, label, mask_src):
-        output = self.forward(src, seg, mask_src)
-        return self.loss(output, label.float())
+        raise NotImplementedError
     
+    # TODO: Use Trainer and Dataset from huggingface
     def train_model(self, train_dataset, dev_dataset, test_dataset):
         """ Train the model """
         # Prepare optimizer and schedule (linear warmup and decay)
@@ -100,9 +99,9 @@ class BaseModel(nn.Module):
             random.shuffle(train_dataset)
             epoch_loss = 0.0
             for j in range(0, len(train_dataset), self.args.batch_size):
-                src, seg, label, mask_src = self.Batch(train_dataset, j, self.args, self.lang2pad).get()
+                batch_data = self.Batch(train_dataset, j, self.args, self.lang2pad).get()
                 self.train()
-                loss = self.get_loss(src, seg, label, mask_src)
+                loss = self.get_loss(**batch_data)
                 loss = loss.sum()/self.args.batch_size
                 if self.args.n_gpu > 1:
                     loss = loss.mean()  # mean() to average on multi-gpu parallel (not distributed) training
@@ -137,6 +136,10 @@ class BaseModel(nn.Module):
 class SentimentModel(BaseModel):
     def __init__(self, args, logger, lang2model, lang2pad):
         super().__init__(args, logger, lang2model, lang2pad)
+        self.linear = nn.Linear(self.bert.config.hidden_size, 1)
+        self.dropout = nn.Dropout(0.2)
+        self.sigmoid = nn.Sigmoid()
+        self.loss = nn.BCELoss(reduction='none') 
         self.Batch = SentimentBatch
 
     def forward(self, src, seg, mask_src):
@@ -148,7 +151,7 @@ class SentimentModel(BaseModel):
         conclusion = self.linear(top_vec).squeeze()
         return self.sigmoid(conclusion)
     
-    def predict(self, src, seg, mask_src):
+    def predict(self, src, seg, mask_src, label=None):
         output = self.forward(src, seg, mask_src)
         prediction = output.cpu().data.numpy() > 0.5
         if type (prediction) == np.bool_:
@@ -160,14 +163,22 @@ class SentimentModel(BaseModel):
         golds = []
         self.eval()
         for j in range(0, len(dataset), self.args.batch_size):
-            src, seg, label, mask_src = self.Batch(dataset, j, self.args, self.lang2pad).get()
-            preds += self.predict(src, seg, mask_src)
-            golds += label.cpu().data.numpy().tolist()
+            batch_data = self.Batch(dataset, j, self.args, self.lang2pad).get()
+            preds += self.predict(**batch_data)
+            golds += batch_data["label"].cpu().data.numpy().tolist()
         return f1_score(golds, preds), accuracy_score(golds, preds)
     
-class NextTweetPredictionModel(BaseModel):
+    def get_loss(self, src, seg, label, mask_src):
+        output = self.forward(src, seg, mask_src)
+        return self.loss(output, label.float())
+    
+class NTPModel(BaseModel):
     def __init__(self, args, logger, lang2model, lang2pad):
         super().__init__(args, logger, lang2model, lang2pad)
+        self.linear = nn.Linear(self.bert.config.hidden_size, 1)
+        self.dropout = nn.Dropout(0.2)
+        self.sigmoid = nn.Sigmoid()
+        self.loss = nn.BCELoss(reduction='none') 
         self.Batch = NTPBatch
 
     def forward(self, src, seg, mask_src):
@@ -195,8 +206,71 @@ class NextTweetPredictionModel(BaseModel):
         assert len(dataset)%4==0
         assert self.args.batch_size%4==0
         for j in range(0, len(dataset), self.args.batch_size):
-            src, seg, label, mask_src = self.Batch(dataset, j, self.args.batch_size, self.args.device).get()
-            answer, prediction = self.predict(src, seg, mask_src, label)
+            batch_data = self.Batch(dataset, j, self.args, self.lang2pad).get()
+            answer, prediction = self.predict(**batch_data)
             golds += answer
             preds += prediction
         return accuracy_score(golds, preds)
+    
+    def get_loss(self, src, seg, label, mask_src):
+        output = self.forward(src, seg, mask_src)
+        return self.loss(output, label.float())
+
+class TweetOrderingModel(BaseModel):
+    def __init__(self, args, logger, lang2model, lang2pad):
+        super().__init__(args, logger, lang2model, lang2pad)
+        self.linear = nn.Linear(self.bert.config.hidden_size, 5)
+        self.dropout = nn.Dropout(0.2)
+        self.loss = nn.CrossEntropyLoss(ignore_index=5, reduction='sum')
+        self.Batch = TweetOrderingBatch
+
+    def forward(self, src, seg, mask_src, cls_id, cls_mask):
+        output = self.bert(input_ids=src, token_type_ids=seg, attention_mask=mask_src)
+        top_vec = output.last_hidden_state
+        
+        sents_vec = top_vec[torch.arange(top_vec.size(0)).unsqueeze(1), cls_id] #batch_size * 5 * dim
+        sents_vec = sents_vec * cls_mask[:, :, None].float()
+        final_rep = self.dropout(sents_vec)
+        conclusion = self.linear(final_rep) #batch_size * 5 * 5
+        return conclusion #batch_size * 5 * 5
+    
+    def compute(self, matrix, length):
+        ids = list(permutations(np.arange(length),length))
+        ids = [list(i) for i in ids]
+        maxs = []; max_score = 0
+        for x in ids:
+            score = 0.0
+            for j, i in enumerate(x):
+                score += matrix[j][i]
+            if score > max_score:
+                max_score = score
+                maxs = x
+        return maxs
+
+    def predict(self, src, seg, mask_src, label, cls_id, cls_mask):
+        output = self.forward(src, seg, mask_src, cls_id, cls_mask)
+        batch_size = output.shape[0]
+        cors = []
+        for idx in range(batch_size):
+            limit = cls_mask[idx].sum()
+            cur_output = output[idx][:limit]
+            cur_prediction = torch.nn.Softmax(dim=-1)(cur_output.masked_fill(cls_mask[idx]==0, -np.inf))
+            
+            pred_rank = self.compute(cur_prediction.data.cpu().tolist(), limit.item())
+            gold_rank = label[idx].data.cpu().tolist()[:limit]
+            coef, _ = spearmanr(pred_rank, gold_rank)
+            cors.append(coef)
+        return cors
+    
+    def prediction(self, dataset):
+        rank_cors = []
+        self.eval()
+        for j in range(0, len(dataset), self.args.batch_size):
+            batch_data = self.Batch(dataset, j, self.args, self.lang2pad).get()
+            cors = self.predict(**batch_data)
+            rank_cors += cors
+        return np.mean(rank_cors)
+    
+    def get_loss(self, src, seg, label, mask_src, cls_id, cls_mask):
+        output = self.forward(src, seg, mask_src, cls_id, cls_mask)
+        return self.loss(output.view(-1,5), label.view(-1))
