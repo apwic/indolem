@@ -44,4 +44,4 @@ if __name__ == "__main__":
 
     global_step, tr_loss, best_metrics = model.train_model(train_dataset, dev_dataset, test_dataset)
     print('Dev set accuracy', best_metrics['acc'])
-    print('Test set accuracy', best_metrics['acc_test'])
+    print('Test set accuracy', best_metrics['test_acc'])

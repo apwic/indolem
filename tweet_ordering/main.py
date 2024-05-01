@@ -42,7 +42,7 @@ for idx in range(5):
     
     global_step, tr_loss, best_metrics = model.train_model(train_dataset, dev_dataset, test_dataset)
     dev_rankCorrs += best_metrics['rank_corr']
-    test_rankCorrs += best_metrics['rank_corr_test']
+    test_rankCorrs += best_metrics['test_rank_corr']
 
 print('End of Training 5-fold')
 print('Dev set RankCorr', dev_rankCorrs/5.0)
