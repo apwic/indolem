@@ -43,9 +43,9 @@ if __name__ == "__main__":
         dev_dataset = bertdata.preprocess(xdev, ydev)
         test_dataset = bertdata.preprocess(xtest, ytest)
         
-        global_step, tr_loss, best_f1_dev, best_f1_test = model.train_model(train_dataset, dev_dataset, test_dataset)
-        dev_f1s += best_f1_dev
-        test_f1s += best_f1_test
+        global_step, tr_loss, best_metrics = model.train_model(train_dataset, dev_dataset, test_dataset)
+        dev_f1s += best_metrics['f1']
+        test_f1s += best_metrics['test_f1']
 
     print('End of Training 5-fold')
     print('Dev set F1', dev_f1s/5.0)

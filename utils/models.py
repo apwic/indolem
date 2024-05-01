@@ -23,6 +23,7 @@ class BaseModel(nn.Module):
         self.lang2pad = lang2pad
         self.Batch = None
         self.adapters = args.adapters
+        self.primary_metric = None
 
         # Initialize adapters based on specified configurations
         if self.adapters:
@@ -63,6 +64,34 @@ class BaseModel(nn.Module):
     def get_loss(self, src, seg, label, mask_src):
         raise NotImplementedError
     
+    def evaluate_and_log(self, writer, dev_dataset, test_dataset, epoch, best_metrics, cur_patience):
+        dev_result = self.prediction(dev_dataset)
+        
+        # log all metrics returned from the model
+        for metric_name, metric_value in dev_result.items():
+            writer.add_scalar(f'Validation {metric_name}', metric_value, epoch)
+
+        primary_metric_value = dev_result.get(self.primary_metric)
+        best_primary_metric_value = best_metrics.get(self.primary_metric, 0)
+
+        # check for improvement
+        if primary_metric_value > best_primary_metric_value:
+            best_metrics[self.primary_metric] = primary_metric_value
+            test_result = self.prediction(test_dataset)
+            test_primary_metric_value = test_result.get(self.primary_metric)
+            best_metrics[f'test_{self.primary_metric}'] = test_primary_metric_value
+            cur_patience = 0
+            self.logger.info(f"Better, BEST {self.primary_metric.upper()} in DEV = {primary_metric_value} & BEST {self.primary_metric.upper()} in TEST = {test_primary_metric_value}.")
+        else:
+            cur_patience += 1
+            if cur_patience == self.args.patience:
+                self.logger.info(f"Early Stopping Not Better, BEST {self.primary_metric.upper()} in DEV = {best_metrics[self.primary_metric]} & BEST {self.primary_metric.upper()} in TEST = {best_metrics[f'test_{self.primary_metric}']}.")
+                return True, best_metrics, cur_patience
+            else:
+                self.logger.info("Not Better.")
+
+        return False, best_metrics, cur_patience
+    
     # TODO: Use Trainer and Dataset from huggingface
     def train_model(self, train_dataset, dev_dataset, test_dataset):
         """ Train the model """
@@ -94,14 +123,13 @@ class BaseModel(nn.Module):
         set_seed(self.args)
         tr_loss = 0.0
         global_step = 1
-        best_f1_dev = 0
-        best_f1_test = 0
+        best_metrics = {}
         cur_patience = 0
-        for i in range(int(self.args.num_train_epochs)):
+        for epoch in range(int(self.args.num_train_epochs)):
             random.shuffle(train_dataset)
             epoch_loss = 0.0
-            for j in range(0, len(train_dataset), self.args.batch_size):
-                batch_data = self.Batch(train_dataset, j, self.args, self.lang2pad).get()
+            for batch in range(0, len(train_dataset), self.args.batch_size):
+                batch_data = self.Batch(train_dataset, batch, self.args, self.lang2pad).get()
                 self.train()
                 loss = self.get_loss(**batch_data)
                 loss = loss.sum()/self.args.batch_size
@@ -119,26 +147,14 @@ class BaseModel(nn.Module):
 
                 writer.add_scalar('Training Loss', loss.item(), global_step)  # log training loss
             
-            self.logger.info("Finish epoch = %s, loss_epoch = %s", i+1, epoch_loss/global_step)
-            dev_f1, dev_acc = self.prediction(dev_dataset)
-            writer.add_scalar('Validation F1 Score', dev_f1, i)  # log validation F1 Score
-            writer.add_scalar('Validation Accuracy', dev_acc, i)  # log validation accuracy
-            if dev_f1 > best_f1_dev:
-                best_f1_dev = dev_f1
-                test_f1, test_acc = self.prediction(test_dataset)
-                best_f1_test = test_f1
-                cur_patience = 0
-                self.logger.info("Better, BEST F1 in DEV = %s & BEST F1 in test = %s.", best_f1_dev, best_f1_test)
-            else:
-                cur_patience += 1
-                if cur_patience == self.args.patience:
-                    self.logger.info("Early Stopping Not Better, BEST F1 in DEV = %s & BEST F1 in test = %s.", best_f1_dev, best_f1_test)
-                    break
-                else:
-                    self.logger.info("Not Better, BEST F1 in DEV = %s & BEST F1 in test = %s.", best_f1_dev, best_f1_test)
+            self.logger.info("Finish epoch = %s, loss_epoch = %s", epoch+1, epoch_loss/global_step)
+            stop_early, best_metrics, cur_patience = self.evaluate_and_log(writer, dev_dataset, test_dataset, epoch, best_metrics, cur_patience)
+            
+            if stop_early:
+                break
 
         writer.close()
-        return global_step, tr_loss / global_step, best_f1_dev, best_f1_test
+        return global_step, tr_loss / global_step, best_metrics
 
 class SentimentModel(BaseModel):
     def __init__(self, args, logger, lang2model, lang2pad):
@@ -148,6 +164,7 @@ class SentimentModel(BaseModel):
         self.sigmoid = nn.Sigmoid()
         self.loss = nn.BCELoss(reduction='none') 
         self.Batch = SentimentBatch
+        self.primary_metric = 'f1'
 
     def forward(self, src, seg, mask_src):
         output = self.bert(input_ids=src, token_type_ids=seg, attention_mask=mask_src)
@@ -178,7 +195,7 @@ class SentimentModel(BaseModel):
     def get_loss(self, src, seg, label, mask_src):
         output = self.forward(src, seg, mask_src)
         return self.loss(output, label.float())
-    
+
 class NTPModel(BaseModel):
     def __init__(self, args, logger, lang2model, lang2pad):
         super().__init__(args, logger, lang2model, lang2pad)
@@ -187,6 +204,7 @@ class NTPModel(BaseModel):
         self.sigmoid = nn.Sigmoid()
         self.loss = nn.BCELoss(reduction='none') 
         self.Batch = NTPBatch
+        self.primary_metric = 'acc'
 
     def forward(self, src, seg, mask_src):
         output = self.bert(input_ids=src, token_type_ids=seg, attention_mask=mask_src)
@@ -230,6 +248,7 @@ class TweetOrderingModel(BaseModel):
         self.dropout = nn.Dropout(0.2)
         self.loss = nn.CrossEntropyLoss(ignore_index=5, reduction='sum')
         self.Batch = TweetOrderingBatch
+        self.primary_metric = 'rank_corr'
 
     def forward(self, src, seg, mask_src, cls_id, cls_mask):
         output = self.bert(input_ids=src, token_type_ids=seg, attention_mask=mask_src)

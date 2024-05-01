@@ -40,9 +40,9 @@ for idx in range(5):
     dev_dataset = bertdata.preprocess(devset[0], devset[1])
     test_dataset = bertdata.preprocess(testset[0], testset[1])
     
-    global_step, tr_loss, best_rankCorr_dev, best_rankCorr_test = model.train_model(train_dataset, dev_dataset, test_dataset)
-    dev_rankCorrs += best_rankCorr_dev
-    test_rankCorrs += best_rankCorr_test
+    global_step, tr_loss, best_metrics = model.train_model(train_dataset, dev_dataset, test_dataset)
+    dev_rankCorrs += best_metrics['rank_corr']
+    test_rankCorrs += best_metrics['rank_corr_test']
 
 print('End of Training 5-fold')
 print('Dev set RankCorr', dev_rankCorrs/5.0)

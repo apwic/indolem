@@ -42,6 +42,6 @@ if __name__ == "__main__":
     dev_dataset = bertdata.preprocess(devset[0], devset[1], devset[2])
     test_dataset = bertdata.preprocess(testset[0], testset[1], testset[2])
 
-    global_step, tr_loss, best_acc_dev, best_acc_test = model.train_model(train_dataset, dev_dataset, test_dataset)
-    print('Dev set accuracy', best_acc_dev)
-    print('Test set accuracy', best_acc_test)
+    global_step, tr_loss, best_metrics = model.train_model(train_dataset, dev_dataset, test_dataset)
+    print('Dev set accuracy', best_metrics['acc'])
+    print('Test set accuracy', best_metrics['acc_test'])
