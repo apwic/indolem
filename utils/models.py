@@ -190,7 +190,7 @@ class SentimentModel(BaseModel):
             batch_data = self.Batch(dataset, j, self.args, self.lang2pad).get()
             preds += self.predict(**batch_data)
             golds += batch_data["label"].cpu().data.numpy().tolist()
-        return f1_score(golds, preds), accuracy_score(golds, preds)
+        return {"f1": f1_score(golds, preds), "acc": accuracy_score(golds, preds)}
     
     def get_loss(self, src, seg, label, mask_src):
         output = self.forward(src, seg, mask_src)
@@ -235,7 +235,7 @@ class NTPModel(BaseModel):
             answer, prediction = self.predict(**batch_data)
             golds += answer
             preds += prediction
-        return accuracy_score(golds, preds)
+        return {"acc": accuracy_score(golds, preds)}
     
     def get_loss(self, src, seg, label, mask_src):
         output = self.forward(src, seg, mask_src)
@@ -295,7 +295,7 @@ class TweetOrderingModel(BaseModel):
             batch_data = self.Batch(dataset, j, self.args, self.lang2pad).get()
             cors = self.predict(**batch_data)
             rank_cors += cors
-        return np.mean(rank_cors)
+        return {"rank_corr" : np.mean(rank_cors)}
     
     def get_loss(self, src, seg, label, mask_src, cls_id, cls_mask):
         output = self.forward(src, seg, mask_src, cls_id, cls_mask)
