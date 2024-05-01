@@ -8,6 +8,7 @@ from itertools import permutations
 from adapters import ConfigUnion, LoRAConfig, PrefixTuningConfig, IA3Config
 from sklearn.metrics import f1_score, accuracy_score
 from transformers import BertModel, get_linear_schedule_with_warmup
+from torch.utils.tensorboard import SummaryWriter
 from utils.utils import set_seed
 from utils.batch import SentimentBatch, NTPBatch, TweetOrderingBatch
 
@@ -65,6 +66,7 @@ class BaseModel(nn.Module):
     # TODO: Use Trainer and Dataset from huggingface
     def train_model(self, train_dataset, dev_dataset, test_dataset):
         """ Train the model """
+        writer = SummaryWriter(f"runs/{self.args.name}")
         # Prepare optimizer and schedule (linear warmup and decay)
         no_decay = ["bias", "LayerNorm.weight"]
         t_total = len(train_dataset) // self.args.batch_size * self.args.num_train_epochs
@@ -114,9 +116,13 @@ class BaseModel(nn.Module):
                 scheduler.step()  # Update learning rate schedule
                 self.zero_grad()
                 global_step += 1
+
+                writer.add_scalar('Training Loss', loss.item(), global_step)  # log training loss
             
             self.logger.info("Finish epoch = %s, loss_epoch = %s", i+1, epoch_loss/global_step)
             dev_f1, dev_acc = self.prediction(dev_dataset)
+            writer.add_scalar('Validation F1 Score', dev_f1, i)  # log validation F1 Score
+            writer.add_scalar('Validation Accuracy', dev_acc, i)  # log validation accuracy
             if dev_f1 > best_f1_dev:
                 best_f1_dev = dev_f1
                 test_f1, test_acc = self.prediction(test_dataset)
@@ -131,6 +137,7 @@ class BaseModel(nn.Module):
                 else:
                     self.logger.info("Not Better, BEST F1 in DEV = %s & BEST F1 in test = %s.", best_f1_dev, best_f1_test)
 
+        writer.close()
         return global_step, tr_loss / global_step, best_f1_dev, best_f1_test
 
 class SentimentModel(BaseModel):

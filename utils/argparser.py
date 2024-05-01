@@ -25,6 +25,7 @@ class BaseArgParser(argparse.ArgumentParser):
         self.add_argument('--world_size', type=int, default=1)
         self.add_argument('--adapters', type=adapter_names_type, default=None, 
                         help="Comma-separated list of adapter names to use, or 'None' for no adapters (default: None)")
+        self.add_argument('--name', default='experiment', help='experiment name')
 
 class SentimentArgParser(BaseArgParser):
     def __init__(self):
