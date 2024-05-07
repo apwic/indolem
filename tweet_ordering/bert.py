@@ -123,8 +123,8 @@ class Model(nn.Module):
         self.loss = torch.nn.CrossEntropyLoss(ignore_index=5, reduction='sum')
     
     def forward(self, src, seg, mask_src, cls_id, cls_mask):
-        batch_size = src.shape[0]
-        top_vec, _ = self.bert(input_ids=src, token_type_ids=seg, attention_mask=mask_src)
+        output = self.bert(input_ids=src, token_type_ids=seg, attention_mask=mask_src)
+        top_vec = output.last_hidden_state
         
         sents_vec = top_vec[torch.arange(top_vec.size(0)).unsqueeze(1), cls_id] #batch_size * 5 * dim
         sents_vec = sents_vec * cls_mask[:, :, None].float()
