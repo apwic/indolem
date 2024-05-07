@@ -23,9 +23,15 @@ class BaseArgParser(argparse.ArgumentParser):
         self.add_argument('--patience', type=int, default=5, help='patience for early stopping')
         self.add_argument('--no_cuda', default=False)
         self.add_argument('--world_size', type=int, default=1)
-        self.add_argument('--adapters', type=adapter_names_type, default=None, 
-                        help="Comma-separated list of adapter names to use, or 'None' for no adapters (default: None)")
         self.add_argument('--name', default='experiment', help='experiment name')
+
+        self.add_argument('--adapters', type=adapter_names_type, default=None, 
+                        help="comma-separated list of adapter names to use, or 'None' for no adapters (default: None)")
+        
+        # adapter-specific arguments
+        self.add_argument('--lora_rank', type=int, default=8, help='rank for LoRA adapter')
+        self.add_argument('--lora_dropout', type=float, default=0.1, help='dropout rate for LoRA adapter')
+        self.add_argument('--lora_alpha', type=int, default=8, help='scaling of LoRA parameterization')
 
 class SentimentArgParser(BaseArgParser):
     def __init__(self):

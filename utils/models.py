@@ -5,7 +5,7 @@ import torch.nn as nn
 import adapters
 from scipy.stats import spearmanr
 from itertools import permutations
-from adapters import ConfigUnion, LoRAConfig, PrefixTuningConfig, IA3Config
+from adapters import ConfigUnion, LoRAConfig, PrefixTuningConfig, IA3Config, BertAdapterModel
 from sklearn.metrics import f1_score, accuracy_score
 from transformers import BertModel, get_linear_schedule_with_warmup
 from torch.utils.tensorboard import SummaryWriter
@@ -43,7 +43,7 @@ class BaseModel(nn.Module):
     # TODO: Adding arguments for adapters hyperparameter
     def get_adapter_config(self, adapter_name):
         if adapter_name == "lora":
-            return LoRAConfig(r=8, dropout=0.01)
+            return LoRAConfig(r=self.args.lora_rank, dropout=self.args.lora_dropout, alpha=self.args.lora_alpha)
         elif adapter_name == "prefix_tuning":
             return PrefixTuningConfig(flat=False, prefix_length=10)
         elif adapter_name == "IA3":
